@@ -28,6 +28,7 @@ services:
     container_name: spoticord-oauth
     restart: unless-stopped
     environment:
+      APP_NAME:              "${APP_NAME:-Spoticord}"
       SPOTIFY_CLIENT_ID:     "${SPOTIFY_CLIENT_ID}"
       SPOTIFY_CLIENT_SECRET: "${SPOTIFY_CLIENT_SECRET}"
       SPOTIFY_REDIRECT_URI:  "${SPOTIFY_REDIRECT_URI}"
@@ -50,6 +51,7 @@ services:
     environment:
       DISCORD_TOKEN:         "${DISCORD_TOKEN}"
       DISCORD_PREFIX:        "${DISCORD_PREFIX:-!}"
+      APP_NAME:              "${APP_NAME:-Spoticord}"
       SPOTIFY_CLIENT_ID:     "${SPOTIFY_CLIENT_ID}"
       SPOTIFY_CLIENT_SECRET: "${SPOTIFY_CLIENT_SECRET}"
       SPOTIFY_REDIRECT_URI:  "${SPOTIFY_REDIRECT_URI}"

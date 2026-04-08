@@ -71,6 +71,7 @@ docker compose logs -f discord-bot librespot oauth-server
 Core:
 - DISCORD_TOKEN
 - DISCORD_PREFIX
+- APP_NAME
 - SPOTIFY_CLIENT_ID
 - SPOTIFY_CLIENT_SECRET
 - SPOTIFY_REDIRECT_URI
@@ -88,8 +89,14 @@ Presence:
 - DISCORD_ACTIVITY_TEXT
 - DISCORD_ACTIVITY_TYPE (PLAYING, LISTENING, WATCHING, STREAMING, COMPETING)
 
+Branding:
+- APP_NAME (used in embeds and bot-facing text)
+
 Logging:
 - LOG_LEVEL
+
+Voice safety:
+- EMPTY_CHANNEL_LEAVE_MS (default 180000; stop and leave if no human users remain)
 
 See defaults in [.env.example](.env.example).
 

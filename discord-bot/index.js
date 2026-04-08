@@ -21,15 +21,19 @@ const LIBRESPOT_API         = process.env.LIBRESPOT_API_URL || 'http://librespot
 const SPOTIFY_CLIENT_ID     = process.env.SPOTIFY_CLIENT_ID;
 const SPOTIFY_CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET;
 const SPOTIFY_REDIRECT_URI  = process.env.SPOTIFY_REDIRECT_URI;
+const APP_NAME              = process.env.APP_NAME || 'Nikitify';
 const SPOTIFY_SHARED_DISCORD_ID = process.env.SPOTIFY_SHARED_DISCORD_ID || '';
 const SPOTIFY_CONTROLLER_MODE = (process.env.SPOTIFY_CONTROLLER_MODE || 'requester').toLowerCase();
 const CONFIG_FILE           = process.env.CONFIG_FILE || '/data/guild_config.json';
 const JAM_LINKS_FILE        = process.env.JAM_LINKS_FILE || '/data/jam_links.json';
 const TOKEN_DIR             = process.env.TOKEN_DIR || '/data/tokens';
 const IDLE_LEAVE_MS         = 5 * 60 * 1000;
+const EMPTY_CHANNEL_LEAVE_MS = parseInt(process.env.EMPTY_CHANNEL_LEAVE_MS || '180000', 10);
 const LIBRESPOT_EVENT_POLL_MS = 120;
+const SPOTIFY_DEVICE_NAME   = process.env.SPOTIFY_DEVICE_NAME || 'SpoticordPi';
 const DISCORD_ACTIVITY_TEXT = process.env.DISCORD_ACTIVITY_TEXT || 'Spotify Connect';
 const DISCORD_ACTIVITY_TYPE = process.env.DISCORD_ACTIVITY_TYPE || 'LISTENING';
+const APP_FOOTER_TEXT       = `${APP_NAME}  ·  ${DISCORD_ACTIVITY_TEXT}`;
 
 function resolveActivityType(typeRaw) {
   const t = String(typeRaw || '').trim().toUpperCase();
@@ -122,11 +126,11 @@ async function sendSpotifyLoginPrompt(user, prefix = DISCORD_PREFIX) {
   const link = authUrl(user.id);
   const embed = new EmbedBuilder()
     .setColor(0x1DB954)
-    .setTitle('Link your Spotify account to Nikitify')
+    .setTitle(`Link your Spotify account to ${APP_NAME}`)
     .setDescription(
       `[Click here to connect your Spotify ->](${link})\n\nAfter logging in, return to Discord and run ${prefix}start again.`
     )
-    .setFooter({ text: 'Nikitify  ·  Spotify Connect' });
+    .setFooter({ text: APP_FOOTER_TEXT });
 
   try {
     await user.send({ embeds: [embed] });
@@ -203,7 +207,7 @@ async function releaseSpotifyController(guildId) {
 
   try {
     const devices = await spotifyApi(token.access_token, '/me/player/devices');
-    const targetName = process.env.SPOTIFY_DEVICE_NAME || 'NikitifyPi';
+    const targetName = SPOTIFY_DEVICE_NAME;
     const list = Array.isArray(devices?.devices) ? devices.devices : [];
     const fallback =
       list.find(d => d.name !== targetName && (d.type === 'Smartphone' || d.type === 'Computer')) ||
@@ -258,11 +262,11 @@ function buildEmbed(np, hostName) {
   const bar = progressBar(np.progress, np.duration);
   const embed = new EmbedBuilder()
     .setColor(0x1DB954)
-    .setAuthor({ name: 'Now Playing on Nikitify', iconURL: 'https://storage.googleapis.com/pr-newsroom-wp/1/2018/11/Spotify_Logo_RGB_Green.png' })
+    .setAuthor({ name: `Now Playing on ${APP_NAME}`, iconURL: 'https://storage.googleapis.com/pr-newsroom-wp/1/2018/11/Spotify_Logo_RGB_Green.png' })
     .setTitle(np.title).setURL(np.trackUrl)
     .setDescription(`by **${np.artist}**  ·  *${np.album}*`)
     .addFields({ name: `${msToTime(np.progress)}  ${bar}  ${msToTime(np.duration)}`, value: `${np.isPlaying ? '**Playing**' : '**Paused**'}  ·  Host: **${hostName}**` })
-    .setFooter({ text: 'Nikitify  ·  Spotify Connect' }).setTimestamp();
+    .setFooter({ text: APP_FOOTER_TEXT }).setTimestamp();
   if (np.albumArt) embed.setThumbnail(np.albumArt);
   return embed;
 }
@@ -527,6 +531,7 @@ async function connectAndStream(guild, channelId) {
     player,
     ffmpeg: null,
     idleSince: Date.now(),
+    emptySince: null,
     leavingForIdle: false,
     restartTimer: null,
   };
@@ -594,6 +599,20 @@ async function idleVoiceMonitor() {
   const now = Date.now();
   for (const [guildId, s] of Object.entries(guildState)) {
     if (!s?.connection || !s?.player) continue;
+
+    const guild = client.guilds.cache.get(guildId);
+    const channelId = s.connection.joinConfig?.channelId;
+    const channel = guild && channelId ? guild.channels.cache.get(String(channelId)) : null;
+    const humanCount = channel?.members ? channel.members.filter(m => !m.user?.bot).size : 0;
+    if (humanCount === 0) {
+      if (!s.emptySince) s.emptySince = now;
+      if (now - s.emptySince >= EMPTY_CHANNEL_LEAVE_MS) {
+        await terminateGuildPlayback(guildId, 'Session ended due to 3 minutes with no users in voice channel.');
+        continue;
+      }
+    } else {
+      s.emptySince = null;
+    }
 
     const status = s.player.state.status;
     if (status === AudioPlayerStatus.Playing) {
@@ -831,7 +850,7 @@ const commands = {
 
     let devices;
     try {
-      const waited = await waitForSpotifyDevice(token.access_token, process.env.SPOTIFY_DEVICE_NAME || 'NikitifyPi', 25000);
+      const waited = await waitForSpotifyDevice(token.access_token, SPOTIFY_DEVICE_NAME, 25000);
       devices = { devices: waited.devices };
     } catch (e) {
       log.warn(`[${msg.guild.id}] !start devices error: ${e.message}`);
@@ -845,9 +864,9 @@ const commands = {
       return msg.reply({ content: `❌ Spotify login succeeded, but playback is unavailable: ${m.slice(0, 180)}` });
     }
 
-    const deviceName = process.env.SPOTIFY_DEVICE_NAME || 'NikitifyPi';
+    const deviceName = SPOTIFY_DEVICE_NAME;
     const device = devices.devices?.find(d => d.name === deviceName);
-    if (!device) return msg.reply({ embeds: [new EmbedBuilder().setColor(0xe74c3c).setTitle('Device Not Found').setDescription(`**${deviceName}** is not visible in Spotify.`).setFooter({ text: 'Nikitify' })] });
+    if (!device) return msg.reply({ embeds: [new EmbedBuilder().setColor(0xe74c3c).setTitle('Device Not Found').setDescription(`**${deviceName}** is not visible in Spotify.`).setFooter({ text: APP_NAME })] });
 
     try {
       await spotifyApi(token.access_token, '/me/player', 'PUT', { device_ids: [device.id], play: true });
@@ -878,7 +897,7 @@ const commands = {
   sessions[msg.guild.id] = { hostId: msg.author.id, controllerId, hostName, npMessage: null, lastTrackId: null, lastIsPlaying: null, lastEmbedUpdate: 0 };
     await new Promise(r => setTimeout(r, 1200));
   const np = await getNowPlaying(controllerId);
-    const embed = np ? buildEmbed(np, hostName) : new EmbedBuilder().setColor(0x1DB954).setAuthor({ name: 'Session Started', iconURL: 'https://storage.googleapis.com/pr-newsroom-wp/1/2018/11/Spotify_Logo_RGB_Green.png' }).setDescription(`Host: **${hostName}**\nOpen Spotify and play something on **${deviceName}**!`).setFooter({ text: 'Nikitify  ·  Spotify Connect' });
+    const embed = np ? buildEmbed(np, hostName) : new EmbedBuilder().setColor(0x1DB954).setAuthor({ name: 'Session Started', iconURL: 'https://storage.googleapis.com/pr-newsroom-wp/1/2018/11/Spotify_Logo_RGB_Green.png' }).setDescription(`Host: **${hostName}**\nOpen Spotify and play something on **${deviceName}**!`).setFooter({ text: APP_FOOTER_TEXT });
     const npMsg = await msg.reply({ embeds: [embed], components: np ? [buildControls(np.isPlaying)] : [], fetchReply: true });
     sessions[msg.guild.id].npMessage = npMsg;
     if (np) { sessions[msg.guild.id].lastTrackId = np.trackId; sessions[msg.guild.id].lastIsPlaying = np.isPlaying; }
@@ -926,12 +945,12 @@ const commands = {
   async status(msg) {
     const health = await fetch(`${LIBRESPOT_API}/health`).then(r => r.json()).catch(() => ({ status: 'unreachable' }));
     const session = sessions[msg.guild.id]; const s = guildState[msg.guild.id];
-    await msg.reply({ embeds: [new EmbedBuilder().setColor(0x1DB954).setTitle('Nikitify Status').addFields(
-      { name: 'Spotify Connect', value: health.status === 'ok' ? 'Online' : 'Offline', inline: true },
+    await msg.reply({ embeds: [new EmbedBuilder().setColor(0x1DB954).setTitle(`${APP_NAME} Status`).addFields(
+      { name: DISCORD_ACTIVITY_TEXT, value: health.status === 'ok' ? 'Online' : 'Offline', inline: true },
       { name: 'Streaming', value: s?.player?.state?.status === AudioPlayerStatus.Playing ? 'Active' : 'Idle', inline: true },
       { name: 'Pipe', value: fs.existsSync(PIPE_PATH) ? 'Ready' : 'Missing', inline: true },
       { name: 'Session', value: session ? session.hostName : 'None', inline: true },
-    ).setFooter({ text: 'Nikitify' })] });
+    ).setFooter({ text: APP_NAME })] });
   },
   async debug(msg) {
     const session = sessions[msg.guild.id];
@@ -952,7 +971,7 @@ const commands = {
       { name: 'Configured Channel', value: String(configuredChannelId), inline: true },
       { name: 'Joined Channel', value: String(joinedChannelId), inline: true },
       { name: 'Pipe Exists', value: fs.existsSync(PIPE_PATH) ? 'yes' : 'no', inline: true },
-    ).setFooter({ text: 'Nikitify Debug' })] });
+    ).setFooter({ text: `${APP_NAME} Debug` })] });
   },
   async controller(msg) {
     const session = sessions[msg.guild.id];
@@ -1059,7 +1078,7 @@ const commands = {
       if (!saved) {
         return msg.reply({ content: '❌ No Jam link saved yet. Use !jam <link> to save one.' });
       }
-      return msg.reply({ embeds: [new EmbedBuilder().setColor(0x1DB954).setTitle('Saved Jam Link').setDescription(`[Click to join Spotify Jam](${saved})`).setFooter({ text: 'Nikitify' })] });
+      return msg.reply({ embeds: [new EmbedBuilder().setColor(0x1DB954).setTitle('Saved Jam Link').setDescription(`[Click to join Spotify Jam](${saved})`).setFooter({ text: APP_NAME })] });
     }
 
     const link = String(args[0]).trim();
@@ -1068,17 +1087,17 @@ const commands = {
     }
 
     setJamLink(msg.guild.id, link);
-    await msg.reply({ embeds: [new EmbedBuilder().setColor(0x1DB954).setTitle('Jam Link Saved').setDescription(`[Click to join Spotify Jam](${link})`).setFooter({ text: 'Nikitify' })] });
+    await msg.reply({ embeds: [new EmbedBuilder().setColor(0x1DB954).setTitle('Jam Link Saved').setDescription(`[Click to join Spotify Jam](${link})`).setFooter({ text: APP_NAME })] });
   },
   async ping(msg) { await msg.reply({ content: `${Math.round(client.ws.ping)}ms` }); },
   async help(msg) {
-    await msg.reply({ embeds: [new EmbedBuilder().setColor(0x1DB954).setTitle('Nikitify Commands').addFields(
+    await msg.reply({ embeds: [new EmbedBuilder().setColor(0x1DB954).setTitle(`${APP_NAME} Commands`).addFields(
       { name: 'Playback', value: '`!start`  `!stop`  `!np`  `!session`' },
       { name: 'Audio',    value: '`!volume [0-200]`  `!restart`' },
       { name: 'Voice',    value: '`!join`  `!leave`  `!setchannel [#ch]`' },
       { name: 'Account',  value: '`!link`  `!unlink`  `!jam [link]`  `!ping`' },
       { name: 'Debug',    value: '`!debug`  `!controller`  `!tokeninfo`  `!devices`  `!voice`  `!flush`  `!restream`' },
-    ).setFooter({ text: 'Nikitify  ·  Spotify Connect' })] });
+    ).setFooter({ text: APP_FOOTER_TEXT })] });
   },
 };
 commands.nowplaying = commands.np;

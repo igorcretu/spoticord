@@ -14,13 +14,14 @@ import time
 from pathlib import Path
 
 import requests
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, render_template_string, request
 
 app = Flask(__name__)
 
 CLIENT_ID     = os.environ["SPOTIFY_CLIENT_ID"]
 CLIENT_SECRET = os.environ["SPOTIFY_CLIENT_SECRET"]
 REDIRECT_URI  = os.environ["SPOTIFY_REDIRECT_URI"]
+APP_NAME      = os.environ.get("APP_NAME", "Spoticord")
 TOKEN_DIR     = Path("/data/tokens")
 TOKEN_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -29,7 +30,7 @@ SUCCESS_HTML = """<!DOCTYPE html>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Spoticord – Connected!</title>
+  <title>{{ app_name }} - Connected!</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -65,7 +66,7 @@ SUCCESS_HTML = """<!DOCTYPE html>
   <div class="card">
     <div class="icon">🎵</div>
     <h1>You're connected!</h1>
-    <p>Your Spotify account is now linked to Spoticord.<br>
+    <p>Your Spotify account is now linked to {{ app_name }}.<br>
        Return to Discord and run <strong>!start</strong> to begin your session.</p>
     <div class="pill">You can close this tab</div>
   </div>
@@ -76,18 +77,18 @@ ERROR_HTML = """<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Spoticord – Error</title>
+  <title>{{ app_name }} - Error</title>
   <style>
-    body {{ min-height:100vh;display:flex;align-items:center;justify-content:center;
-           background:#121212;font-family:sans-serif;color:#fff;text-align:center; }}
-    h1 {{ color:#e74c3c;margin-bottom:1rem; }}
-    p  {{ color:#b3b3b3; }}
+    body { min-height:100vh;display:flex;align-items:center;justify-content:center;
+           background:#121212;font-family:sans-serif;color:#fff;text-align:center; }
+    h1 { color:#e74c3c;margin-bottom:1rem; }
+    p  { color:#b3b3b3; }
   </style>
 </head>
 <body>
   <div>
     <h1>❌ Something went wrong</h1>
-    <p>{message}</p>
+    <p>{{ message }}</p>
     <p style="margin-top:1rem;font-size:.875rem">Return to Discord and try <strong>!start</strong> again.</p>
   </div>
 </body>
@@ -98,13 +99,13 @@ ERROR_HTML = """<!DOCTYPE html>
 def callback():
     # Spotify sends an error param if the user denied access
     if error := request.args.get("error"):
-        return ERROR_HTML.format(message=f"Spotify returned: {error}"), 400
+        return render_template_string(ERROR_HTML, app_name=APP_NAME, message=f"Spotify returned: {error}"), 400
 
     code       = request.args.get("code")
     discord_id = request.args.get("state")
 
     if not code or not discord_id:
-        return ERROR_HTML.format(message="Missing code or state parameter."), 400
+        return render_template_string(ERROR_HTML, app_name=APP_NAME, message="Missing code or state parameter."), 400
 
     # Exchange the auth code for access + refresh tokens
     try:
@@ -120,7 +121,7 @@ def callback():
         )
         resp.raise_for_status()
     except requests.RequestException as exc:
-        return ERROR_HTML.format(message=f"Token exchange failed: {exc}"), 502
+        return render_template_string(ERROR_HTML, app_name=APP_NAME, message=f"Token exchange failed: {exc}"), 502
 
     token_data = resp.json()
 
@@ -132,7 +133,7 @@ def callback():
     token_path = TOKEN_DIR / f"{discord_id}.json"
     token_path.write_text(json.dumps(token_data, indent=2))
 
-    return SUCCESS_HTML, 200
+    return render_template_string(SUCCESS_HTML, app_name=APP_NAME), 200
 
 
 @app.get("/has-token/<int:discord_id>")

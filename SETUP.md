@@ -225,6 +225,8 @@ SPOTIFY_REDIRECT_URI=https://spoticord.yourdomain.com/callback
 # Discord bot token
 DISCORD_TOKEN=your_discord_bot_token
 DISCORD_PREFIX=!
+APP_NAME=Spoticord
+EMPTY_CHANNEL_LEAVE_MS=180000
 
 LOG_LEVEL=INFO
 ```
