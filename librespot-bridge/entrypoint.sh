@@ -161,10 +161,14 @@ ARGS=(
 
 echo "[librespot] Starting ${SPOTIFY_DEVICE_NAME:-SpoticordPi}…"
 
-# Rate-limited relay: reads stdin AND writes FIFO at real-time pace.
-# Sleep BEFORE each read so librespot's stdout buffer never builds up.
-PIPE_PATH="$PIPE" librespot "${ARGS[@]}" | python3 -u /app/relay.py &
-RELAY_PID=$!
+# Keep the control API alive even if librespot auth fails temporarily.
+while true; do
+    # Rate-limited relay: reads stdin AND writes FIFO at real-time pace.
+    # Sleep BEFORE each read so librespot's stdout buffer never builds up.
+    PIPE_PATH="$PIPE" librespot "${ARGS[@]}" | python3 -u /app/relay.py &
+    RELAY_PID=$!
 
-wait "$RELAY_PID"
-echo "[librespot] Relay exited"
+    wait "$RELAY_PID" || true
+    echo "[librespot] Relay exited; retrying in 3s"
+    sleep 3
+done
