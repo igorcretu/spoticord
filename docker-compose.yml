@@ -14,6 +14,7 @@ services:
       SPOTIFY_VOLUME:        "${SPOTIFY_VOLUME:-80}"
       SPOTIFY_CLIENT_ID:     "${SPOTIFY_CLIENT_ID}"
       SPOTIFY_CLIENT_SECRET: "${SPOTIFY_CLIENT_SECRET}"
+      SPOTIFY_SHARED_DISCORD_ID: "${SPOTIFY_SHARED_DISCORD_ID:-}"
     volumes:
       - audio_pipe:/tmp/audio
       - bot_config:/data
@@ -52,6 +53,8 @@ services:
       SPOTIFY_CLIENT_ID:     "${SPOTIFY_CLIENT_ID}"
       SPOTIFY_CLIENT_SECRET: "${SPOTIFY_CLIENT_SECRET}"
       SPOTIFY_REDIRECT_URI:  "${SPOTIFY_REDIRECT_URI}"
+      SPOTIFY_CONTROLLER_MODE: "${SPOTIFY_CONTROLLER_MODE:-requester}"
+      SPOTIFY_SHARED_DISCORD_ID: "${SPOTIFY_SHARED_DISCORD_ID:-}"
       SPOTIFY_DEVICE_NAME:   "${SPOTIFY_DEVICE_NAME:-SpoticordPi}"
       LIBRESPOT_API_URL:     "http://librespot:5050"
       OAUTH_SERVER_URL:      "http://oauth-server:8888"

@@ -9,6 +9,7 @@ from flask import Flask, jsonify, request
 app        = Flask(__name__)
 PID_FILE   = Path("/tmp/librespot.pid")
 PIPE_PATH  = Path("/tmp/audio/spotify.pcm")
+ACTIVE_CONTROLLER_FILE = Path("/data/active_controller_id")
 START_TIME = time.time()
 
 _track_state = {"changed": False, "track_id": None, "event": None}
@@ -67,7 +68,28 @@ def health():
             "mem_mb":  round(p.memory_info().rss / 1_048_576, 1) if p else None,
         },
         "pipe": {"exists": PIPE_PATH.exists()},
+        "controller": {
+            "discord_id": ACTIVE_CONTROLLER_FILE.read_text().strip() if ACTIVE_CONTROLLER_FILE.exists() else None,
+        },
     })
+
+@app.post("/set-controller")
+def set_controller():
+    data = request.get_json(force=True, silent=True) or {}
+    discord_id = str(data.get("discord_id", "")).strip()
+    if not discord_id.isdigit():
+        return jsonify({"error": "discord_id must be numeric"}), 400
+
+    current = ACTIVE_CONTROLLER_FILE.read_text().strip() if ACTIVE_CONTROLLER_FILE.exists() else ""
+    if current == discord_id:
+        return jsonify({"ok": True, "changed": False, "restarting": False, "controller": discord_id})
+
+    ACTIVE_CONTROLLER_FILE.parent.mkdir(parents=True, exist_ok=True)
+    ACTIVE_CONTROLLER_FILE.write_text(discord_id)
+
+    # Restart container process so entrypoint relaunches librespot with new account token.
+    subprocess.Popen(["sh", "-c", "sleep 0.2; kill -TERM 1"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return jsonify({"ok": True, "changed": True, "restarting": True, "controller": discord_id})
 
 @app.post("/restart")
 def restart():

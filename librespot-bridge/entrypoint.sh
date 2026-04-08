@@ -4,6 +4,7 @@ set -euo pipefail
 PIPE=/tmp/audio/spotify.pcm
 TOKEN_DIR=/data/tokens
 CACHE_DIR=/data/librespot-cache
+ACTIVE_CONTROLLER_FILE=/data/active_controller_id
 
 mkdir -p "$CACHE_DIR"
 
@@ -45,7 +46,54 @@ trap cleanup SIGTERM SIGINT
 CREDS_FILE="$CACHE_DIR/credentials.json"
 ACCESS_TOKEN=""
 
-if [[ ! -f "$CREDS_FILE" ]]; then
+# Prefer the active controller account selected by the Discord bot.
+if [[ -f "$ACTIVE_CONTROLLER_FILE" ]]; then
+    ACTIVE_ID=$(tr -d '\r\n' < "$ACTIVE_CONTROLLER_FILE")
+    if [[ -n "$ACTIVE_ID" ]]; then
+        ACTIVE_TOKEN_FILE="$TOKEN_DIR/${ACTIVE_ID}.json"
+        if [[ -f "$ACTIVE_TOKEN_FILE" ]]; then
+            TOKEN=$(python3 - "$ACTIVE_TOKEN_FILE" <<'PYEOF'
+import json, sys
+try:
+    data = json.loads(open(sys.argv[1]).read())
+    print(data.get("access_token", ""), end="")
+except Exception:
+    print("", end="")
+PYEOF
+            )
+            if [[ -n "$TOKEN" ]]; then
+                ACCESS_TOKEN="$TOKEN"
+                rm -f "$CREDS_FILE"
+                echo "[librespot] Using active controller token (${ACTIVE_ID})"
+            fi
+        fi
+    fi
+fi
+
+# If a shared controller is configured, force librespot to boot with that
+# account token so the Spotify device is visible to all users via one account.
+if [[ -z "$ACCESS_TOKEN" && -n "${SPOTIFY_SHARED_DISCORD_ID:-}" ]]; then
+    SHARED_TOKEN_FILE="$TOKEN_DIR/${SPOTIFY_SHARED_DISCORD_ID}.json"
+    if [[ -f "$SHARED_TOKEN_FILE" ]]; then
+        TOKEN=$(python3 - "$SHARED_TOKEN_FILE" <<'PYEOF'
+import json, sys
+try:
+    data = json.loads(open(sys.argv[1]).read())
+    print(data.get("access_token", ""), end="")
+except Exception:
+    print("", end="")
+PYEOF
+        )
+        if [[ -n "$TOKEN" ]]; then
+            ACCESS_TOKEN="$TOKEN"
+            # Clear stale cached credentials from a different Spotify account.
+            rm -f "$CREDS_FILE"
+            echo "[librespot] Using shared controller token (${SPOTIFY_SHARED_DISCORD_ID})"
+        fi
+    fi
+fi
+
+if [[ -z "$ACCESS_TOKEN" && ! -f "$CREDS_FILE" ]]; then
     echo "[librespot] No cached credentials yet — waiting for OAuth token…"
     while true; do
         if [[ -d "$TOKEN_DIR" ]]; then
