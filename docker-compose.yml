@@ -1,0 +1,74 @@
+version: "3.9"
+
+services:
+
+  # ── 1. Spotify Connect sink ──────────────────────────────────────────────
+  librespot:
+    build:
+      context: ./librespot-bridge
+    container_name: spoticord-librespot
+    restart: unless-stopped
+    environment:
+      SPOTIFY_DEVICE_NAME:   "${SPOTIFY_DEVICE_NAME:-SpoticordPi}"
+      SPOTIFY_BITRATE:       "${SPOTIFY_BITRATE:-320}"
+      SPOTIFY_VOLUME:        "${SPOTIFY_VOLUME:-80}"
+      SPOTIFY_CLIENT_ID:     "${SPOTIFY_CLIENT_ID}"
+      SPOTIFY_CLIENT_SECRET: "${SPOTIFY_CLIENT_SECRET}"
+    volumes:
+      - audio_pipe:/tmp/audio
+      - bot_config:/data
+    networks:
+      - spoticord
+
+  # ── 2. OAuth callback server ─────────────────────────────────────────────
+  oauth-server:
+    build:
+      context: ./oauth-server
+    container_name: spoticord-oauth
+    restart: unless-stopped
+    environment:
+      SPOTIFY_CLIENT_ID:     "${SPOTIFY_CLIENT_ID}"
+      SPOTIFY_CLIENT_SECRET: "${SPOTIFY_CLIENT_SECRET}"
+      SPOTIFY_REDIRECT_URI:  "${SPOTIFY_REDIRECT_URI}"
+    volumes:
+      - bot_config:/data
+    ports:
+      - "8888:8888"
+    networks:
+      - spoticord
+
+  # ── 3. Discord bot (Node.js) ─────────────────────────────────────────────
+  discord-bot:
+    build:
+      context: ./discord-bot
+    container_name: spoticord-discord
+    restart: unless-stopped
+    depends_on:
+      - librespot
+      - oauth-server
+    environment:
+      DISCORD_TOKEN:         "${DISCORD_TOKEN}"
+      DISCORD_PREFIX:        "${DISCORD_PREFIX:-!}"
+      SPOTIFY_CLIENT_ID:     "${SPOTIFY_CLIENT_ID}"
+      SPOTIFY_CLIENT_SECRET: "${SPOTIFY_CLIENT_SECRET}"
+      SPOTIFY_REDIRECT_URI:  "${SPOTIFY_REDIRECT_URI}"
+      SPOTIFY_DEVICE_NAME:   "${SPOTIFY_DEVICE_NAME:-SpoticordPi}"
+      LIBRESPOT_API_URL:     "http://librespot:5050"
+      OAUTH_SERVER_URL:      "http://oauth-server:8888"
+      LOG_LEVEL:             "${LOG_LEVEL:-INFO}"
+      CONFIG_FILE:           "/data/guild_config.json"
+      TOKEN_DIR:             "/data/tokens"
+      PIPE_PATH:             "/tmp/audio/spotify.pcm"
+    volumes:
+      - audio_pipe:/tmp/audio
+      - bot_config:/data
+    networks:
+      - spoticord
+
+volumes:
+  audio_pipe:
+  bot_config:
+
+networks:
+  spoticord:
+    driver: bridge
