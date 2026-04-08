@@ -34,6 +34,12 @@ const SPOTIFY_DEVICE_NAME   = process.env.SPOTIFY_DEVICE_NAME || 'SpoticordPi';
 const DISCORD_ACTIVITY_TEXT = process.env.DISCORD_ACTIVITY_TEXT || 'Spotify Connect';
 const DISCORD_ACTIVITY_TYPE = process.env.DISCORD_ACTIVITY_TYPE || 'LISTENING';
 const APP_FOOTER_TEXT       = `${APP_NAME}  ·  ${DISCORD_ACTIVITY_TEXT}`;
+const PRESENCE_UPDATE_MIN_MS = 15_000;
+
+const presenceState = {
+  text: '',
+  at: 0,
+};
 
 function resolveActivityType(typeRaw) {
   const t = String(typeRaw || '').trim().toUpperCase();
@@ -42,6 +48,26 @@ function resolveActivityType(typeRaw) {
   if (t === 'WATCHING') return ActivityType.Watching;
   if (t === 'COMPETING') return ActivityType.Competing;
   return ActivityType.Listening;
+}
+
+function buildPresenceText(np) {
+  if (!np?.title) return DISCORD_ACTIVITY_TEXT;
+  const raw = np.artist ? `${np.title} - ${np.artist}` : np.title;
+  return raw.length > 120 ? `${raw.slice(0, 117)}...` : raw;
+}
+
+function updatePresence(np = null, force = false) {
+  if (!client?.user) return;
+  const now = Date.now();
+  const text = buildPresenceText(np);
+  if (!force && text === presenceState.text && now - presenceState.at < PRESENCE_UPDATE_MIN_MS) return;
+  try {
+    client.user.setActivity(text, { type: resolveActivityType(DISCORD_ACTIVITY_TYPE) });
+    presenceState.text = text;
+    presenceState.at = now;
+  } catch (e) {
+    log.debug(`presence update failed: ${e.message}`);
+  }
 }
 
 // ── Logging ───────────────────────────────────────────────────────────────────
@@ -650,6 +676,7 @@ async function spotifyPoller() {
   if (pollerRunning) { log.debug('poller: skipping, previous still running'); return; }
   pollerRunning = true;
   try {
+    let presenceTrack = null;
     for (const [guildId, session] of Object.entries(sessions)) {
       if (!session?.hostId) continue;
       const controllerId = session.controllerId || session.hostId;
@@ -657,6 +684,7 @@ async function spotifyPoller() {
       log.debug(`[${guildId}] poller: fetching Spotify state`);
       const np = await getNowPlaying(controllerId);
       log.debug(`[${guildId}] poller: np=${np?.title ?? 'null'} playing=${np?.isPlaying} trackId=${np?.trackId?.slice(-6)}`);
+      if (!presenceTrack && np?.isPlaying) presenceTrack = np;
 
       const trackChanged = np && np.trackId   !== session.lastTrackId;
       const pauseChanged = np && np.isPlaying !== session.lastIsPlaying;
@@ -710,6 +738,7 @@ async function spotifyPoller() {
         } catch (e) { if (e.code === 10008) session.npMessage = null; }
       }
     }
+    updatePresence(presenceTrack);
   } finally {
     pollerRunning = false;
   }
@@ -1116,7 +1145,7 @@ client.on(Events.MessageCreate, async msg => {
 
 client.once(Events.ClientReady, () => {
   log.info(`Logged in as ${client.user.tag}`);
-  client.user.setActivity(DISCORD_ACTIVITY_TEXT, { type: resolveActivityType(DISCORD_ACTIVITY_TYPE) });
+  updatePresence(null, true);
   setInterval(streamLoop,    10_000);
   setInterval(spotifyPoller,  1_000);
   setInterval(librespotEventPoller, LIBRESPOT_EVENT_POLL_MS);
