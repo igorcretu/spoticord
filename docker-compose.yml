@@ -70,6 +70,18 @@ services:
     networks:
       - spoticord
 
+  # ── 4. Daily weather poster ──────────────────────────────────────────────────
+  weather:
+    build:
+      context: ./discord-bot
+    container_name: spoticord-weather
+    restart: unless-stopped
+    environment:
+      WEATHER_WEBHOOK_URL: "${WEATHER_WEBHOOK_URL}"
+    command: ["node", "weather-cron.js"]
+    networks:
+      - spoticord
+
 volumes:
   audio_pipe:
   bot_config:

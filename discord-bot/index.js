@@ -12,6 +12,7 @@ const { spawn } = require('child_process');
 const fetch = (...args) => import('node-fetch').then(({ default: f }) => f(...args));
 const fs   = require('fs');
 const path = require('path');
+const FRIEND_MESSAGES = require('./messages');
 
 // ── Config ────────────────────────────────────────────────────────────────────
 const DISCORD_TOKEN         = process.env.DISCORD_TOKEN;
@@ -80,6 +81,17 @@ const log = {
 
 process.on('unhandledRejection', e => log.error('Unhandled rejection:', e));
 process.on('uncaughtException',  e => { log.error('Uncaught exception:', e); process.exit(1); });
+
+// ── Bazinga ───────────────────────────────────────────────────────────────────
+let bazingaQueue = [];
+
+function getNextBazinga() {
+  if (bazingaQueue.length === 0) {
+    bazingaQueue = [...FRIEND_MESSAGES].sort(() => Math.random() - 0.5);
+  }
+  return bazingaQueue.pop();
+}
+
 
 // ── Config helpers ────────────────────────────────────────────────────────────
 function loadConfig() {
@@ -1146,13 +1158,14 @@ const commands = {
     setJamLink(msg.guild.id, link);
     await msg.reply({ embeds: [new EmbedBuilder().setColor(0x1DB954).setTitle('Jam Link Saved').setDescription(`[Click to join Spotify Jam](${link})`).setFooter({ text: APP_NAME })] });
   },
+  async bazinga(msg) { await msg.reply({ content: getNextBazinga() }); },
   async ping(msg) { await msg.reply({ content: `${Math.round(client.ws.ping)}ms` }); },
   async help(msg) {
     await msg.reply({ embeds: [new EmbedBuilder().setColor(0x1DB954).setTitle(`${APP_NAME} Commands`).addFields(
       { name: 'Playback', value: '`!start`  `!stop`  `!np`  `!session`' },
       { name: 'Audio',    value: '`!volume [0-200]`  `!restart`' },
       { name: 'Voice',    value: '`!join`  `!leave`  `!setchannel [#ch]`' },
-      { name: 'Account',  value: '`!link`  `!unlink`  `!jam [link]`  `!ping`' },
+      { name: 'Account',  value: '`!link`  `!unlink`  `!jam [link]`  `!ping`  `!bazinga`' },
       { name: 'Debug',    value: '`!debug`  `!controller`  `!tokeninfo`  `!devices`  `!voice`  `!flush`  `!restream`' },
     ).setFooter({ text: APP_FOOTER_TEXT })] });
   },
@@ -1179,6 +1192,7 @@ client.once(Events.ClientReady, () => {
   setInterval(librespotEventPoller, LIBRESPOT_EVENT_POLL_MS);
   setInterval(() => { idleVoiceMonitor().catch(e => log.warn('idleVoiceMonitor:', e.message)); }, 10_000);
   setTimeout(streamLoop,      3_000);
+
 });
 
 client.login(DISCORD_TOKEN);
