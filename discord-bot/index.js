@@ -522,7 +522,8 @@ function startStreaming(guildId) {
   });
 
   const resource = createAudioResource(ff.stdout, { inputType: StreamType.OggOpus, inlineVolume: true });
-  resource.volume?.setVolume(0.8);
+  const volPct = Number(s.volumePercent ?? 80);
+  resource.volume?.setVolume(Math.max(0, Math.min(volPct, 200)) / 100);
   s.player.play(resource);
   log.info(`[${guildId}] Streaming started`);
 }
@@ -556,6 +557,7 @@ async function connectAndStream(guild, channelId) {
     connection,
     player,
     ffmpeg: null,
+    volumePercent: 80,
     idleSince: Date.now(),
     emptySince: null,
     leavingForIdle: false,
@@ -690,6 +692,10 @@ async function spotifyPoller() {
       const pauseChanged = np && np.isPlaying !== session.lastIsPlaying;
       const justPaused   = pauseChanged && !np.isPlaying;
       const justResumed  = pauseChanged && np.isPlaying;
+      const prevRemainingMs = (typeof session.lastDuration === 'number' && typeof session.lastProgress === 'number')
+        ? session.lastDuration - session.lastProgress
+        : null;
+      const naturalBoundaryChange = trackChanged && typeof prevRemainingMs === 'number' && prevRemainingMs >= 0 && prevRemainingMs <= 2500;
       const realtimeHandledRecently = Date.now() - (session.lastRealtimeEventAt || 0) < 600;
 
       if (trackChanged || pauseChanged) {
@@ -701,15 +707,20 @@ async function spotifyPoller() {
         cancelRestart(guildId);
 
         if (trackChanged) {
-          // Hard reset on song switch to purge stale frames decisively.
-          stopPlayer(guildId);
-          killFfmpeg(guildId);
-          log.debug(`[${guildId}] Calling /flush on librespot`);
-          const t0 = Date.now();
-          await fetch(`${LIBRESPOT_API}/flush`, { method: 'POST' }).catch(e => log.warn('flush API error:', e.message));
-          log.debug(`[${guildId}] /flush done in ${Date.now()-t0}ms`);
-          flushPipe();
-          if (np.isPlaying) scheduleRestart(guildId, 10, 'spotify-track-changed');
+          if (naturalBoundaryChange) {
+            // Keep the stream continuous at natural boundaries to avoid audible gaps.
+            log.debug(`[${guildId}] Natural track boundary detected (${prevRemainingMs}ms left), keeping stream running`);
+          } else {
+            // Non-natural jumps (e.g. manual skip/seek) still get a hard reset.
+            stopPlayer(guildId);
+            killFfmpeg(guildId);
+            log.debug(`[${guildId}] Calling /flush on librespot`);
+            const t0 = Date.now();
+            await fetch(`${LIBRESPOT_API}/flush`, { method: 'POST' }).catch(e => log.warn('flush API error:', e.message));
+            log.debug(`[${guildId}] /flush done in ${Date.now()-t0}ms`);
+            flushPipe();
+            if (np.isPlaying) scheduleRestart(guildId, 10, 'spotify-track-changed');
+          }
         } else if (justPaused) {
           // Soft pause keeps encoder alive and avoids resume startup delay.
           pausePlayer(guildId);
@@ -728,6 +739,8 @@ async function spotifyPoller() {
       if (np) {
         session.lastTrackId   = np.trackId;
         session.lastIsPlaying = np.isPlaying;
+        session.lastProgress  = np.progress;
+        session.lastDuration  = np.duration;
       }
 
       // Update embed
@@ -771,7 +784,7 @@ async function librespotEventPoller() {
 
       log.debug(`[realtime] librespot event=${event}`);
 
-      if (pauseLike || isTrackChanged) {
+      if (pauseLike) {
         await fetch(`${LIBRESPOT_API}/flush`, { method: 'POST' }).catch(() => null);
         flushPipe();
       }
@@ -793,9 +806,15 @@ async function librespotEventPoller() {
         if (isTrackChanged || trackIdChanged) {
           session.lastIsPlaying = true;
           cancelRestart(guildId);
-          stopPlayer(guildId);
-          killFfmpeg(guildId);
-          scheduleRestart(guildId, 10, `librespot-event-${event}${trackIdChanged ? '-trackid' : ''}`);
+          const status = guildState[guildId]?.player?.state?.status;
+          const streaming = status === AudioPlayerStatus.Playing || status === AudioPlayerStatus.Buffering;
+          if (streaming) {
+            log.debug(`[${guildId}] Realtime track change while streaming; keeping pipeline to reduce transition gap`);
+          } else {
+            stopPlayer(guildId);
+            killFfmpeg(guildId);
+            scheduleRestart(guildId, 10, `librespot-event-${event}${trackIdChanged ? '-trackid' : ''}`);
+          }
         } else if (playLike) {
           session.lastIsPlaying = true;
           if (!resumePlayer(guildId)) {
@@ -966,9 +985,18 @@ const commands = {
     if (!args[0]) { const r = await fetch(`${LIBRESPOT_API}/volume`).then(r => r.json()).catch(() => null); return msg.reply({ content: `Volume: **${r?.volume ?? '?'}%**` }); }
     const vol = parseInt(args[0]);
     if (isNaN(vol) || vol < 0 || vol > 200) return msg.reply({ content: '❌ 0-200 only.' });
-    await fetch(`${LIBRESPOT_API}/volume`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ level: vol }) });
+
     const s = guildState[msg.guild.id];
+    if (s) s.volumePercent = vol;
     if (s?.player?.state?.resource?.volume) s.player.state.resource.volume.setVolume(vol / 100);
+
+    // Apply Discord-side volume immediately, then sync bridge in the background.
+    fetch(`${LIBRESPOT_API}/volume`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ level: Math.max(0, Math.min(vol, 100)) }),
+    }).catch(e => log.debug(`[${msg.guild.id}] volume sync warning: ${e.message}`));
+
     await msg.reply({ content: `Volume: **${vol}%**` });
   },
   async status(msg) {
