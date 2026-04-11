@@ -1,10 +1,15 @@
 // ============================================================
 //  Discord Weather Webhook — Open-Meteo (no API key needed)
-//  Posts weather for multiple locations in one message
-//  Usage: node weather-webhook.js
+//  Updates one persistent message in place
 // ============================================================
 
-const WEBHOOK_URL = "https://discordapp.com/api/webhooks/1492208491191078912/Rmg1v2u5TF6xD3_O99hCPwXy2Rgo3yqD5Sp2fYT-k1FThRH7dydyJBCz83-SYiPa1wpD";
+const fs = require('fs');
+const path = require('path');
+
+const WEBHOOK_URL = process.env.WEATHER_WEBHOOK_URL || '';
+const WEATHER_USERNAME = process.env.WEATHER_WEBHOOK_USERNAME || 'Serii Meteoroloh';
+const WEATHER_AVATAR_URL = process.env.WEATHER_WEBHOOK_AVATAR_URL || 'https://cdn.discordapp.com/avatars/1492208491191078912/f4ddf7f6e9a1d0867d7cb7786ad47bba.webp?size=160';
+const WEATHER_STATE_FILE = process.env.WEATHER_STATE_FILE || '/data/weather_message_state.json';
 
 const LOCATIONS = [
   { name: "Copenhagen, Denmark",  latitude: 55.6761,  longitude: 12.5683  },
@@ -80,8 +85,8 @@ async function fetchWeather({ latitude, longitude }) {
   return res.json();
 }
 
-// ── Build one embed per location ─────────────────────────────
-function buildEmbed(data, locationName, color) {
+// ── Build one inline field per location ──────────────────────
+function buildLocationField(data, locationName) {
   const c = data.current;
   const d = data.daily;
 
@@ -91,68 +96,72 @@ function buildEmbed(data, locationName, color) {
   const dirs  = ["N","NE","E","SE","S","SW","W","NW"];
   const arrow = dirs[Math.round(c.wind_direction_10m / 45) % 8];
 
-  const forecastFields = d.time.slice(1, 4).map((dateStr, i) => {
+  const forecast = d.time.slice(1, 4).map((dateStr, i) => {
     const day = new Date(dateStr).toLocaleDateString("en-GB", {
       weekday: "short", month: "short", day: "numeric",
     });
     const w = WMO_CODES[d.weather_code[i + 1]] ?? { emoji: "🌡️", label: "" };
-    return {
-      name:   `${w.emoji} ${day}`,
-      value:  `↑ **${d.temperature_2m_max[i + 1]}°C** · ↓ ${d.temperature_2m_min[i + 1]}°C\n🌧 ${d.precipitation_sum[i + 1]} mm`,
-      inline: true,
-    };
-  });
-
-  const now = new Date().toLocaleString("en-GB", {
-    timeZone:  data.timezone,
-    dateStyle: "full",
-    timeStyle: "short",
+    return `${w.emoji} ${day}: ↑${d.temperature_2m_max[i + 1]}° ↓${d.temperature_2m_min[i + 1]}° · 🌧${d.precipitation_sum[i + 1]}mm`;
   });
 
   return {
-    title:       `${wmo.emoji}  Weather in ${locationName}`,
-    description: `**${wmo.label}** — ${now}`,
-    color,
-    fields: [
-      {
-        name:   "🌡️ Temperature",
-        value:  `**${c.temperature_2m}°C** (feels like ${c.apparent_temperature}°C)`,
-        inline: true,
-      },
-      {
-        name:   "💧 Humidity",
-        value:  `${c.relative_humidity_2m}%`,
-        inline: true,
-      },
-      {
-        name:   "🌧️ Precipitation",
-        value:  `${c.precipitation} mm`,
-        inline: true,
-      },
-      {
-        name:   "💨 Wind",
-        value:  `${c.wind_speed_10m} km/h ${arrow} — ${windDesc}`,
-        inline: true,
-      },
-      { name: "\u200b", value: "**3-Day Forecast**", inline: false },
-      ...forecastFields,
-    ],
+    name: `${wmo.emoji} ${locationName}`,
+    value: [
+      `**${wmo.label}**`,
+      `🌡 **${c.temperature_2m}°C** (feels ${c.apparent_temperature}°C)`,
+      `💧 ${c.relative_humidity_2m}% · 🌧 ${c.precipitation} mm`,
+      `💨 ${c.wind_speed_10m} km/h ${arrow} (${windDesc})`,
+      `**3-day:** ${forecast.join(' | ')}`,
+    ].join('\n'),
+    inline: true,
+  };
+}
+
+function buildEmbed(locationFields) {
+  return {
+    title: '🌦 Weather Update',
+    description: 'Auto-refresh every 10 minutes',
+    color: EMBED_COLORS[0],
+    fields: locationFields,
     footer: {
-      text: "Powered by Open-Meteo • open-meteo.com",
+      text: 'Powered by Open-Meteo • open-meteo.com',
     },
     timestamp: new Date().toISOString(),
   };
 }
 
-// ── Post all embeds in a single Discord message ───────────────
-async function postToDiscord(embeds) {
+function readState() {
+  try {
+    return JSON.parse(fs.readFileSync(WEATHER_STATE_FILE, 'utf8'));
+  } catch {
+    return {};
+  }
+}
+
+function writeState(data) {
+  fs.mkdirSync(path.dirname(WEATHER_STATE_FILE), { recursive: true });
+  fs.writeFileSync(WEATHER_STATE_FILE, JSON.stringify(data, null, 2));
+}
+
+function webhookUrlWithWait() {
+  const u = new URL(WEBHOOK_URL);
+  u.searchParams.set('wait', 'true');
+  return u.toString();
+}
+
+function webhookMessageUrl(messageId) {
+  const base = WEBHOOK_URL.replace(/\/$/, '');
+  return `${base}/messages/${messageId}`;
+}
+
+async function createWeatherMessage(embed) {
   const payload = {
-    username:   "Serii Meteoroloh",
-    avatar_url: "https://cdn.discordapp.com/avatars/1492208491191078912/f4ddf7f6e9a1d0867d7cb7786ad47bba.webp?size=160",
-    embeds,
+    username: WEATHER_USERNAME,
+    avatar_url: WEATHER_AVATAR_URL,
+    embeds: [embed],
   };
 
-  const res = await fetch(WEBHOOK_URL, {
+  const res = await fetch(webhookUrlWithWait(), {
     method:  "POST",
     headers: { "Content-Type": "application/json" },
     body:    JSON.stringify(payload),
@@ -162,7 +171,48 @@ async function postToDiscord(embeds) {
     const text = await res.text();
     throw new Error(`Discord error ${res.status}: ${text}`);
   }
-  console.log("✅ Weather posted to Discord successfully.");
+  const created = await res.json();
+  if (created?.id) {
+    writeState({ messageId: created.id });
+  }
+  console.log('✅ Weather message created successfully.');
+}
+
+async function updateWeatherMessage(messageId, embed) {
+  const payload = {
+    username: WEATHER_USERNAME,
+    avatar_url: WEATHER_AVATAR_URL,
+    embeds: [embed],
+  };
+
+  const res = await fetch(webhookMessageUrl(messageId), {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+
+  if (res.status === 404) return false;
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Discord update error ${res.status}: ${text}`);
+  }
+
+  console.log('✅ Weather message updated successfully.');
+  return true;
+}
+
+async function postToDiscord(embed) {
+  if (!WEBHOOK_URL) {
+    throw new Error('WEATHER_WEBHOOK_URL is not set.');
+  }
+
+  const state = readState();
+  if (state.messageId) {
+    const updated = await updateWeatherMessage(state.messageId, embed);
+    if (updated) return;
+  }
+
+  await createWeatherMessage(embed);
 }
 
 // ── Main ─────────────────────────────────────────────────────
@@ -173,11 +223,11 @@ async function runWeather() {
     LOCATIONS.map(loc => fetchWeather(loc))
   );
 
-  const embeds = results.map((data, i) =>
-    buildEmbed(data, LOCATIONS[i].name, EMBED_COLORS[i])
+  const fields = results.map((data, i) =>
+    buildLocationField(data, LOCATIONS[i].name)
   );
 
-  await postToDiscord(embeds);
+  await postToDiscord(buildEmbed(fields));
 }
 
 module.exports = { runWeather };

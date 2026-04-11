@@ -78,7 +78,12 @@ services:
     restart: unless-stopped
     environment:
       WEATHER_WEBHOOK_URL: "${WEATHER_WEBHOOK_URL}"
+      WEATHER_WEBHOOK_USERNAME: "${WEATHER_WEBHOOK_USERNAME:-Serii Meteoroloh}"
+      WEATHER_WEBHOOK_AVATAR_URL: "${WEATHER_WEBHOOK_AVATAR_URL:-}"
+      WEATHER_STATE_FILE: "/data/weather_message_state.json"
     command: ["node", "weather-cron.js"]
+    volumes:
+      - bot_config:/data
     networks:
       - spoticord
 
