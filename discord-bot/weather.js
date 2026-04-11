@@ -4,7 +4,7 @@
 //  Usage: node weather-webhook.js
 // ============================================================
 
-const WEBHOOK_URL = process.env.WEATHER_WEBHOOK_URL;
+const WEBHOOK_URL = "https://discordapp.com/api/webhooks/1492208491191078912/Rmg1v2u5TF6xD3_O99hCPwXy2Rgo3yqD5Sp2fYT-k1FThRH7dydyJBCz83-SYiPa1wpD";
 
 const LOCATIONS = [
   { name: "Copenhagen, Denmark",  latitude: 55.6761,  longitude: 12.5683  },
@@ -147,8 +147,8 @@ function buildEmbed(data, locationName, color) {
 // ── Post all embeds in a single Discord message ───────────────
 async function postToDiscord(embeds) {
   const payload = {
-    username:   "Weather Bot",
-    avatar_url: "https://cdn-icons-png.flaticon.com/512/1163/1163624.png",
+    username:   "Serii Meteoroloh",
+    avatar_url: "https://cdn.discordapp.com/avatars/1492208491191078912/f4ddf7f6e9a1d0867d7cb7786ad47bba.webp?size=160",
     embeds,
   };
 

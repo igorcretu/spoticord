@@ -13,6 +13,7 @@ const fetch = (...args) => import('node-fetch').then(({ default: f }) => f(...ar
 const fs   = require('fs');
 const path = require('path');
 const FRIEND_MESSAGES = require('./messages');
+const { runWeather } = require('./weather');
 
 // ── Config ────────────────────────────────────────────────────────────────────
 const DISCORD_TOKEN         = process.env.DISCORD_TOKEN;
@@ -1158,14 +1159,36 @@ const commands = {
     setJamLink(msg.guild.id, link);
     await msg.reply({ embeds: [new EmbedBuilder().setColor(0x1DB954).setTitle('Jam Link Saved').setDescription(`[Click to join Spotify Jam](${link})`).setFooter({ text: APP_NAME })] });
   },
-  async bazinga(msg) { await msg.reply({ content: getNextBazinga() }); },
+  async weathertest(msg) {
+    await msg.reply({ content: 'Running weather test...' });
+    try {
+      await runWeather();
+      await msg.reply({ content: 'Weather test finished. Check your weather webhook channel.' });
+    } catch (e) {
+      await msg.reply({ content: `❌ Weather test failed: ${String(e.message || e).slice(0, 180)}` });
+    }
+  },
+  async bazinga(msg) {
+    const line = String(getNextBazinga() || 'Bazinga!').trim() || 'Bazinga!';
+    log.info(`[cmd:bazinga] reply attempt in ${msg.guild ? `guild ${msg.guild.id}` : 'DM'}`);
+    try {
+      await msg.reply({ content: line });
+      log.info('[cmd:bazinga] reply sent');
+    } catch (e) {
+      log.warn(`[cmd:bazinga] primary reply failed: ${e.message}`);
+      // If custom content is blocked (e.g. AutoMod), send a guaranteed-safe fallback.
+      await msg.reply({ content: 'Bazinga!' }).catch(err => {
+        log.error(`[cmd:bazinga] fallback reply failed: ${err.message}`);
+      });
+    }
+  },
   async ping(msg) { await msg.reply({ content: `${Math.round(client.ws.ping)}ms` }); },
   async help(msg) {
     await msg.reply({ embeds: [new EmbedBuilder().setColor(0x1DB954).setTitle(`${APP_NAME} Commands`).addFields(
       { name: 'Playback', value: '`!start`  `!stop`  `!np`  `!session`' },
       { name: 'Audio',    value: '`!volume [0-200]`  `!restart`' },
       { name: 'Voice',    value: '`!join`  `!leave`  `!setchannel [#ch]`' },
-      { name: 'Account',  value: '`!link`  `!unlink`  `!jam [link]`  `!ping`  `!bazinga`' },
+      { name: 'Account',  value: '`!link`  `!unlink`  `!jam [link]`  `!ping`  `!bazinga`  `!weathertest`' },
       { name: 'Debug',    value: '`!debug`  `!controller`  `!tokeninfo`  `!devices`  `!voice`  `!flush`  `!restream`' },
     ).setFooter({ text: APP_FOOTER_TEXT })] });
   },
@@ -1174,14 +1197,30 @@ commands.nowplaying = commands.np;
 commands.login = commands.link;
 
 client.on(Events.MessageCreate, async msg => {
-  if (msg.author.bot || !msg.guild) return;
+  if (msg.author.bot) return;
+  if (!msg.content) {
+    log.warn(`Empty message content from ${msg.author.tag}. If prefix commands do not work, enable Message Content Intent in Discord Developer Portal.`);
+    return;
+  }
   if (!msg.content.startsWith(DISCORD_PREFIX)) return;
   const [rawCmd, ...args] = msg.content.slice(DISCORD_PREFIX.length).trim().split(/\s+/);
+  if (!rawCmd) return;
   const cmd = rawCmd.toLowerCase();
-  if (commands[cmd]) {
-    try { await commands[cmd](msg, args); }
-    catch (e) { log.error(`!${cmd}:`, e); msg.reply({ content: '❌ Error.' }).catch(() => {}); }
+  log.info(`[cmd] received !${cmd} in ${msg.guild ? `guild ${msg.guild.id}` : 'DM'} by ${msg.author.tag}`);
+  const command = commands[cmd];
+  if (!command) {
+    log.debug(`[cmd] unknown command: !${cmd}`);
+    return;
   }
+
+  const dmAllowed = new Set(['bazinga', 'ping', 'help', 'link']);
+  if (!msg.guild && !dmAllowed.has(cmd)) {
+    await msg.reply({ content: '❌ This command only works in a server channel.' }).catch(() => {});
+    return;
+  }
+
+  try { await command(msg, args); }
+  catch (e) { log.error(`!${cmd}:`, e); msg.reply({ content: '❌ Error.' }).catch(() => {}); }
 });
 
 client.once(Events.ClientReady, () => {
