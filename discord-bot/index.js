@@ -85,6 +85,7 @@ process.on('uncaughtException',  e => { log.error('Uncaught exception:', e); pro
 
 // ── Bazinga ───────────────────────────────────────────────────────────────────
 let bazingaQueue = [];
+const sizeUsage = new Map();
 
 function getNextBazinga() {
   if (bazingaQueue.length === 0) {
@@ -1184,6 +1185,16 @@ const commands = {
   },
   async size(msg) {
     const name = msg.member?.displayName || msg.author.username;
+    const now = Date.now();
+    const recentUses = (sizeUsage.get(msg.author.id) || []).filter(ts => now - ts < 60_000);
+    recentUses.push(now);
+    sizeUsage.set(msg.author.id, recentUses);
+
+    if (recentUses.length > 2) {
+      await msg.reply({ content: `${name}, ia-o in gura.` });
+      return;
+    }
+
     const nr = Math.floor(Math.random() * 25) + 1;
     await msg.reply({ content: `${name} are ciocanul de ${nr} cm.` });
   },
