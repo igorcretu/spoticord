@@ -1182,13 +1182,18 @@ const commands = {
       });
     }
   },
+  async size(msg) {
+    const name = msg.member?.displayName || msg.author.username;
+    const nr = Math.floor(Math.random() * 25) + 1;
+    await msg.reply({ content: `${name} are ciocanul de ${nr} cm.` });
+  },
   async ping(msg) { await msg.reply({ content: `${Math.round(client.ws.ping)}ms` }); },
   async help(msg) {
     await msg.reply({ embeds: [new EmbedBuilder().setColor(0x1DB954).setTitle(`${APP_NAME} Commands`).addFields(
       { name: 'Playback', value: '`!start`  `!stop`  `!np`  `!session`' },
       { name: 'Audio',    value: '`!volume [0-200]`  `!restart`' },
       { name: 'Voice',    value: '`!join`  `!leave`  `!setchannel [#ch]`' },
-      { name: 'Account',  value: '`!link`  `!unlink`  `!jam [link]`  `!ping`  `!bazinga`  `!weathertest`' },
+      { name: 'Account',  value: '`!link`  `!unlink`  `!jam [link]`  `!ping`  `!bazinga`  `!size`  `!weathertest`' },
       { name: 'Debug',    value: '`!debug`  `!controller`  `!tokeninfo`  `!devices`  `!voice`  `!flush`  `!restream`' },
     ).setFooter({ text: APP_FOOTER_TEXT })] });
   },
