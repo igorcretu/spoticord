@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Spoticord Live Monitor</title>
+  <link rel="icon" type="image/png" sizes="32x32" href="/dashboard/icon1.png" />
+  <link rel="shortcut icon" href="/favicon.ico" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/dashboard/styles.css" />
+</head>
+<body>
+  <div class="bg-orb bg-orb-a"></div>
+  <div class="bg-orb bg-orb-b"></div>
+
+  <main class="shell">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">Operations Console</p>
+        <h1>Spoticord Live Monitor</h1>
+        <p class="sub">Real-time health and metrics stream for your Discord + Spotify stack.</p>
+      </div>
+      <div class="status-box" id="live-pill">
+        <span class="dot"></span>
+        <span id="live-text">Connecting...</span>
+      </div>
+    </header>
+
+    <section class="grid cards">
+      <article class="card">
+        <p class="label">Overall Health</p>
+        <h2 id="health-status">-</h2>
+        <p class="hint" id="updated-at">Waiting for first sample...</p>
+      </article>
+      <article class="card">
+        <p class="label">Sessions</p>
+        <h2 id="sessions-count">0</h2>
+        <p class="hint">Active listening sessions</p>
+      </article>
+      <article class="card">
+        <p class="label">Guild States</p>
+        <h2 id="guild-count">0</h2>
+        <p class="hint">Guild configs currently loaded</p>
+      </article>
+      <article class="card">
+        <p class="label">Spotify Circuit</p>
+        <h2 id="circuit-state">Closed</h2>
+        <p class="hint">API breaker status</p>
+      </article>
+      <article class="card">
+        <p class="label">Memory RSS</p>
+        <h2 id="memory-rss">0 MB</h2>
+        <p class="hint">Node process resident set size</p>
+      </article>
+      <article class="card">
+        <p class="label">Runtime Errors</p>
+        <h2 id="runtime-errors">0</h2>
+        <p class="hint">Recent captured app-level failures</p>
+      </article>
+      <article class="card">
+        <p class="label">Recent Warnings</p>
+        <h2 id="recent-warns">0</h2>
+        <p class="hint">Warn log entries in current buffer</p>
+      </article>
+      <article class="card">
+        <p class="label">Recent Errors</p>
+        <h2 id="recent-errors">0</h2>
+        <p class="hint">Error log entries in current buffer</p>
+      </article>
+    </section>
+
+    <section class="grid charts">
+      <article class="panel">
+        <div class="panel-head">
+          <h3>Requests and Commands</h3>
+          <span>Last 30 samples</span>
+        </div>
+        <canvas id="command-chart" width="800" height="280" aria-label="Command metrics chart"></canvas>
+      </article>
+      <article class="panel">
+        <div class="panel-head">
+          <h3>Sessions Timeline</h3>
+          <span>Last 30 samples</span>
+        </div>
+        <canvas id="session-chart" width="800" height="280" aria-label="Session metrics chart"></canvas>
+      </article>
+    </section>
+
+    <section class="grid tables">
+      <article class="panel">
+        <div class="panel-head">
+          <h3>Metric Counters</h3>
+          <span>Total counters from bot</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Metric</th><th>Value</th></tr>
+            </thead>
+            <tbody id="metric-body"></tbody>
+          </table>
+        </div>
+      </article>
+
+      <article class="panel">
+        <div class="panel-head">
+          <h3>Active Sessions</h3>
+          <span>Host and voice channel snapshots</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Guild</th><th>Host</th><th>Voice Channel</th></tr>
+            </thead>
+            <tbody id="session-body"></tbody>
+          </table>
+        </div>
+      </article>
+    </section>
+
+    <section class="grid tables">
+      <article class="panel">
+        <div class="panel-head">
+          <h3>Guild Runtime</h3>
+          <span>Voice, player, ffmpeg and restart state</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Guild</th><th>Player</th><th>Conn</th><th>FFmpeg</th><th>RestartTimer</th></tr>
+            </thead>
+            <tbody id="guild-runtime-body"></tbody>
+          </table>
+        </div>
+      </article>
+
+      <article class="panel">
+        <div class="panel-head">
+          <h3>Runtime Errors</h3>
+          <span>Last 40 captured exceptions/failures</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Time</th><th>Scope</th><th>Message</th></tr>
+            </thead>
+            <tbody id="runtime-error-body"></tbody>
+          </table>
+        </div>
+      </article>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h3>Live Logs</h3>
+        <div class="panel-controls">
+          <span>Recent app logs from in-memory buffer</span>
+          <label class="switch-inline" for="logs-autoscroll">
+            <input type="checkbox" id="logs-autoscroll" checked />
+            <span>Auto-scroll</span>
+          </label>
+        </div>
+      </div>
+      <div class="table-wrap logs-wrap" id="logs-wrap">
+        <table>
+          <thead>
+            <tr><th>Time</th><th>Level</th><th>Message</th><th>Meta</th></tr>
+          </thead>
+          <tbody id="live-logs-body"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script src="/dashboard/app.js"></script>
+</body>
+</html>

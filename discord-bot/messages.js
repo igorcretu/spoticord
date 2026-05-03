@@ -5,7 +5,7 @@
 
 module.exports = [
   'Octava s-a cacat in pisoar',
-  'Serii vrea s-o futa pe Lia',
+  //'Serii vrea s-o futa pe Lia',
   'Aici prosta nahui sta un cal',
   'Cretu e citer',
   'Nikitos a plecat la cinema',

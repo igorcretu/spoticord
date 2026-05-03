@@ -1,65 +1,63 @@
 # Spoticord
 
-Spotify Connect -> Discord voice bridge with per-user OAuth, host switching, and multi-guild support.
+Spotify Connect to Discord voice bridge with per-user OAuth, host handoff support, and multi-guild operation.
 
-This project runs three services:
-- librespot bridge: creates the Spotify Connect sink device and emits realtime playback events
-- oauth server: handles Spotify OAuth callback and stores user tokens
-- discord bot: controls playback, streams audio to Discord, and manages sessions/commands
+## Services
+
+This stack runs four containers:
+
+- librespot bridge: Spotify Connect sink plus realtime playback events
+- oauth server: Spotify OAuth callback and token storage
+- discord bot: session orchestration, playback control, voice streaming, commands
+- weather: optional weather webhook poster
 
 ## Architecture
 
-- Discord user runs !start
-- Bot resolves controller account (requester or shared mode)
-- Bot asks bridge to switch active controller account when needed
-- Bridge restarts librespot with the selected account token
-- Bot transfers playback to device name (for example Nikitify)
-- PCM from librespot is encoded with ffmpeg and played in Discord voice
+1. User runs start command.
+2. Bot resolves controller account (requester mode or shared mode).
+3. Bot optionally switches active controller via bridge API.
+4. Librespot exposes Spotify device and outputs PCM to shared pipe.
+5. Discord bot encodes PCM with ffmpeg and streams into voice.
+6. Session state is tracked per guild with host ownership and diagnostics.
 
-Main files:
-- [docker-compose.yml](docker-compose.yml)
-- [discord-bot/index.js](discord-bot/index.js)
-- [librespot-bridge/api.py](librespot-bridge/api.py)
-- [librespot-bridge/entrypoint.sh](librespot-bridge/entrypoint.sh)
-- [oauth-server/app.py](oauth-server/app.py)
+## Key Features
 
-## Features
-
-- Spotify OAuth per Discord user
-- Per-host account switching on !start (requester mode)
-- Realtime playback state sync (track/pause/resume)
-- Voice auto-join and idle auto-leave
-- Now playing embed with controls
-- Saved Jam link per guild
-- Debug command suite for live diagnostics
+- Per-user Spotify OAuth tokens
+- Requester or shared controller mode
+- Presence-based auto leave logic
+- Host leave grace handling and host transfer command
+- Queue history commands
+- Restart watchdog per guild
+- Structured JSON logging with redaction
+- Bot health endpoint and Prometheus-style metrics endpoint
+- Prefix and slash commands
+- Atomic JSON persistence with schema wrapper
 
 ## Requirements
 
-- Docker + Docker Compose
-- Spotify Premium for playback control
-- Discord bot token
-- Spotify Developer app (Client ID/Secret + redirect URI)
-- Public HTTPS callback URL (Cloudflare tunnel recommended)
-
-For full step-by-step onboarding, see [SETUP.md](SETUP.md).
+- Docker and Docker Compose
+- Spotify Premium account
+- Discord bot application and token
+- Spotify Developer app (Client ID, Client Secret, Redirect URI)
+- Public HTTPS callback URL (Cloudflare Tunnel recommended)
 
 ## Quick Start
 
-1. Copy env template:
+1. Copy environment template.
 
 ```bash
 cp .env.example .env
 ```
 
-2. Fill .env values.
+1. Fill required values in .env.
 
-3. Build and start:
+1. Build and start.
 
 ```bash
 docker compose up -d --build
 ```
 
-4. Check services:
+1. Verify.
 
 ```bash
 docker compose ps
@@ -69,6 +67,7 @@ docker compose logs -f discord-bot librespot oauth-server
 ## Environment Variables
 
 Core:
+
 - DISCORD_TOKEN
 - DISCORD_PREFIX
 - APP_NAME
@@ -79,165 +78,165 @@ Core:
 - SPOTIFY_BITRATE
 - SPOTIFY_VOLUME
 
-Controller behavior:
-- SPOTIFY_CONTROLLER_MODE
-  - requester: each !start uses the user who typed !start
-  - shared: all !start calls use SPOTIFY_SHARED_DISCORD_ID
+Controller:
+
+- SPOTIFY_CONTROLLER_MODE (requester or shared)
 - SPOTIFY_SHARED_DISCORD_ID
 
-Presence:
-- DISCORD_ACTIVITY_TEXT
-- DISCORD_ACTIVITY_TYPE (PLAYING, LISTENING, WATCHING, STREAMING, COMPETING)
+Presence and behavior:
 
-Branding:
-- APP_NAME (used in embeds and bot-facing text)
+- DISCORD_ACTIVITY_TEXT
+- DISCORD_ACTIVITY_TYPE
+- AUTO_JOIN_WITHOUT_SESSION
+- HOST_LEAVE_GRACE_MS
+
+Reliability:
+
+- MAX_RESTARTS_PER_MIN
+- BOT_HEALTH_PORT
+- RESTART_STATE_FILE
+
+Command policy:
+
+- MOD_ROLE_IDS (CSV role IDs)
+- ADMIN_ROLE_IDS (CSV role IDs)
 
 Logging:
-- LOG_LEVEL
 
-Voice safety:
-- EMPTY_CHANNEL_LEAVE_MS (default 180000; stop and leave if no human users remain)
+- LOG_LEVEL
 
 See defaults in [.env.example](.env.example).
 
-## Command Reference
+## Commands
 
 Playback:
+
 - !start
 - !stop
 - !np
 - !session
 
+Queue:
+
+- !queue
+- !dequeue [index]
+
 Voice:
+
 - !join
 - !leave
 - !setchannel [#channel]
 
 Audio:
+
 - !volume [0-200]
 - !restart
 
 Account:
-- !link (alias: !login)
+
+- !link
+- !login
 - !unlink
-- !jam [link]
-  - !jam <link>: save/update guild jam link
-  - !jam: return saved guild jam link
+- !jam [url]
 
 Debug:
+
 - !status
 - !debug
+- !diagnostics
 - !controller
 - !tokeninfo
 - !devices
 - !voice
 - !flush
 - !restream
+
+Host management:
+
+- !transferhost @user
+
+Utility:
+
 - !ping
 - !help
 
-## Host Switching Behavior
+Slash commands:
 
-When a different person runs !start in requester mode:
-1. Bot resolves requester as controller
-2. Bot calls bridge /set-controller with requester Discord ID
-3. Bridge restarts librespot with that account token
-4. Bot waits for health/device visibility and transfers playback
+- /start
+- /stop
+- /status
+- /session
+- /queue
+- /dequeue
+- /diagnostics
+- /ping
+- /transferhost
+- /setchannel
+- /restart
 
-Expected side effect:
-- First !start after host change can take a few seconds because of account/device rebinding.
+## Health and Metrics
 
-## Jam Link Workflow
+discord-bot exposes:
 
-- New host starts a session:
-  - Bot prompts about queue sharing
-  - If a jam link is already saved, bot shows the saved link and how to replace it
-- !jam <link> saves the link for that guild
-- !jam returns the saved link
+- /health
+- /metrics
 
-Jam links are persisted in /data.
-
-## Operational Notes
-
-- Device visibility is account-scoped in Spotify Connect.
-- In requester mode, each host should link Spotify first via !link.
-- If a user sees Device Not Found right after host switch, retry once after a short delay.
-
-## Troubleshooting
-
-### 1) Device Not Found
-
-Check:
-- !devices output for active controller
-- SPOTIFY_DEVICE_NAME matches the actual sink name
-- librespot health and controller in /health
-
-Commands:
+Examples:
 
 ```bash
-docker compose logs --tail=200 discord-bot librespot
+docker compose exec -T discord-bot node -e "fetch('http://localhost:7070/health').then(r=>r.text()).then(console.log)"
+docker compose exec -T discord-bot node -e "fetch('http://localhost:7070/metrics').then(r=>r.text()).then(console.log)"
 ```
-
-### 2) Forbidden on !start
-
-Usually account/scope restrictions or non-premium account.
-- Re-link: !unlink then !start
-- Verify app allowlist if Spotify app is in development mode
-
-### 3) First !start fails after !leave
-
-System may still be rebinding account/device.
-- Run !start again after 2-5 seconds
-- Check !controller and !devices
-
-### 4) No sound in Discord
-
-Check:
-- !debug and !voice
-- ffmpeg process running
-- bot connected to expected voice channel
-
-### 5) OAuth callback issues
-
-Check:
-- SPOTIFY_REDIRECT_URI exactly matches Spotify Dashboard redirect URI
-- oauth-server reachable through your public URL
 
 ## Persistence
 
-Stored in Docker volume bot_config (/data):
-- /data/tokens (Spotify OAuth tokens)
+Stored in bot_config Docker volume under /data:
+
+- /data/tokens
 - /data/guild_config.json
 - /data/jam_links.json
+- /data/restart_state.json
 - /data/active_controller_id
 - /data/librespot-cache
 
-## Security
+## Security Notes
 
-- Never commit real secrets from .env.
-- Rotate tokens/secrets immediately if exposed:
-  - DISCORD_TOKEN
-  - SPOTIFY_CLIENT_SECRET
+- Never commit .env.
+- Rotate secrets immediately if exposed.
+- Use LOG_LEVEL=INFO in production unless actively debugging.
+- Set MOD_ROLE_IDS and ADMIN_ROLE_IDS to restrict sensitive commands.
 
-## Useful Commands
+## Troubleshooting
+
+Device not visible:
+
+- Check bridge health and auth logs.
+- Confirm SPOTIFY_DEVICE_NAME.
+- Use !devices for active controller visibility.
+
+No audio in Discord:
+
+- Check !status and !debug.
+- Confirm bot is in expected voice channel.
+- Use !restream or !restart if needed.
+
+OAuth issues:
+
+- Ensure SPOTIFY_REDIRECT_URI exactly matches Spotify dashboard.
+- Confirm oauth-server reachable at public callback URL.
+
+## Useful Operations
 
 ```bash
-# Rebuild bot only
-docker compose up -d --build discord-bot
+# Full rebuild
+docker compose up -d --build
 
-# Rebuild bridge + bot
+# Rebuild selected services
 docker compose up -d --build librespot discord-bot
 
-# Follow logs
+# Follow key logs
 docker compose logs -f discord-bot librespot oauth-server
 
-# Container shell (bot)
-docker exec -it spoticord-discord sh
-
-# Container shell (librespot)
-docker exec -it spoticord-librespot sh
+# Check health states
+docker compose ps
 ```
-
-## Project Status
-
-Current setup supports practical multi-guild usage with per-host controller switching in requester mode. If you need true simultaneous independent playback across many servers/users with zero handoff delay, move to one-isolated-librespot-per-active-session architecture.

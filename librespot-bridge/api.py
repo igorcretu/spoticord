@@ -10,6 +10,7 @@ app        = Flask(__name__)
 PID_FILE   = Path("/tmp/librespot.pid")
 PIPE_PATH  = Path("/tmp/audio/spotify.pcm")
 ACTIVE_CONTROLLER_FILE = Path("/data/active_controller_id")
+MANUAL_STOP_FILE = Path("/tmp/librespot.manual_stop")
 START_TIME = time.time()
 
 _track_state = {"changed": False, "track_id": None, "event": None}
@@ -93,9 +94,20 @@ def set_controller():
 
 @app.post("/restart")
 def restart():
+    if MANUAL_STOP_FILE.exists():
+        MANUAL_STOP_FILE.unlink(missing_ok=True)
     _kill_current()
-    pid = _spawn(_base_cmd())
-    return jsonify({"restarted": True, "pid": pid})
+    return jsonify({"restarted": True, "manual_stop": False})
+
+@app.post("/stop")
+def stop_librespot():
+    MANUAL_STOP_FILE.parent.mkdir(parents=True, exist_ok=True)
+    MANUAL_STOP_FILE.write_text("1")
+    p = _proc()
+    if not p:
+        return jsonify({"stopped": True, "running": False, "manual_stop": True})
+    _kill_current()
+    return jsonify({"stopped": True, "running": _proc() is not None, "manual_stop": True})
 
 @app.post("/volume")
 def set_vol():

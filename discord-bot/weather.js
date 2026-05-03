@@ -85,8 +85,8 @@ async function fetchWeather({ latitude, longitude }) {
   return res.json();
 }
 
-// ── Build one inline field per location ──────────────────────
-function buildLocationField(data, locationName) {
+// ── Build one embed per location ─────────────────────────────
+function buildLocationEmbed(data, locationName, color) {
   const c = data.current;
   const d = data.daily;
 
@@ -96,33 +96,52 @@ function buildLocationField(data, locationName) {
   const dirs  = ["N","NE","E","SE","S","SW","W","NW"];
   const arrow = dirs[Math.round(c.wind_direction_10m / 45) % 8];
 
-  const forecast = d.time.slice(1, 4).map((dateStr, i) => {
+  const forecastFields = d.time.slice(1, 4).map((dateStr, i) => {
     const day = new Date(dateStr).toLocaleDateString("en-GB", {
       weekday: "short", month: "short", day: "numeric",
     });
     const w = WMO_CODES[d.weather_code[i + 1]] ?? { emoji: "🌡️", label: "" };
-    return `${w.emoji} ${day}: ↑${d.temperature_2m_max[i + 1]}° ↓${d.temperature_2m_min[i + 1]}° · 🌧${d.precipitation_sum[i + 1]}mm`;
+    return {
+      name: `${w.emoji} ${day}`,
+      value: `↑ **${d.temperature_2m_max[i + 1]}°C** · ↓ ${d.temperature_2m_min[i + 1]}°C\n🌧 ${d.precipitation_sum[i + 1]} mm`,
+      inline: true,
+    };
+  });
+
+  const now = new Date().toLocaleString("en-GB", {
+    timeZone: data.timezone,
+    dateStyle: "full",
+    timeStyle: "short",
   });
 
   return {
-    name: `${wmo.emoji} ${locationName}`,
-    value: [
-      `**${wmo.label}**`,
-      `🌡 **${c.temperature_2m}°C** (feels ${c.apparent_temperature}°C)`,
-      `💧 ${c.relative_humidity_2m}% · 🌧 ${c.precipitation} mm`,
-      `💨 ${c.wind_speed_10m} km/h ${arrow} (${windDesc})`,
-      `**3-day:** ${forecast.join(' | ')}`,
-    ].join('\n'),
-    inline: true,
-  };
-}
-
-function buildEmbed(locationFields) {
-  return {
-    title: '🌦 Weather Update',
-    description: 'Auto-refresh every 10 minutes',
-    color: EMBED_COLORS[0],
-    fields: locationFields,
+    title: `${wmo.emoji}  Weather in ${locationName}`,
+    description: `**${wmo.label}** — ${now}`,
+    color,
+    fields: [
+      {
+        name: "🌡️ Temperature",
+        value: `**${c.temperature_2m}°C** (feels like ${c.apparent_temperature}°C)`,
+        inline: true,
+      },
+      {
+        name: "💧 Humidity",
+        value: `${c.relative_humidity_2m}%`,
+        inline: true,
+      },
+      {
+        name: "🌧️ Precipitation",
+        value: `${c.precipitation} mm`,
+        inline: true,
+      },
+      {
+        name: "💨 Wind",
+        value: `${c.wind_speed_10m} km/h ${arrow} — ${windDesc}`,
+        inline: true,
+      },
+      { name: "\u200b", value: "**3-Day Forecast**", inline: false },
+      ...forecastFields,
+    ],
     footer: {
       text: 'Powered by Open-Meteo • open-meteo.com',
     },
@@ -154,11 +173,11 @@ function webhookMessageUrl(messageId) {
   return `${base}/messages/${messageId}`;
 }
 
-async function createWeatherMessage(embed) {
+async function createWeatherMessage(embeds) {
   const payload = {
     username: WEATHER_USERNAME,
     avatar_url: WEATHER_AVATAR_URL,
-    embeds: [embed],
+    embeds,
   };
 
   const res = await fetch(webhookUrlWithWait(), {
@@ -178,11 +197,11 @@ async function createWeatherMessage(embed) {
   console.log('✅ Weather message created successfully.');
 }
 
-async function updateWeatherMessage(messageId, embed) {
+async function updateWeatherMessage(messageId, embeds) {
   const payload = {
     username: WEATHER_USERNAME,
     avatar_url: WEATHER_AVATAR_URL,
-    embeds: [embed],
+    embeds,
   };
 
   const res = await fetch(webhookMessageUrl(messageId), {
@@ -201,18 +220,18 @@ async function updateWeatherMessage(messageId, embed) {
   return true;
 }
 
-async function postToDiscord(embed) {
+async function postToDiscord(embeds) {
   if (!WEBHOOK_URL) {
     throw new Error('WEATHER_WEBHOOK_URL is not set.');
   }
 
   const state = readState();
   if (state.messageId) {
-    const updated = await updateWeatherMessage(state.messageId, embed);
+    const updated = await updateWeatherMessage(state.messageId, embeds);
     if (updated) return;
   }
 
-  await createWeatherMessage(embed);
+  await createWeatherMessage(embeds);
 }
 
 // ── Main ─────────────────────────────────────────────────────
@@ -223,11 +242,11 @@ async function runWeather() {
     LOCATIONS.map(loc => fetchWeather(loc))
   );
 
-  const fields = results.map((data, i) =>
-    buildLocationField(data, LOCATIONS[i].name)
+  const embeds = results.map((data, i) =>
+    buildLocationEmbed(data, LOCATIONS[i].name, EMBED_COLORS[i])
   );
 
-  await postToDiscord(buildEmbed(fields));
+  await postToDiscord(embeds);
 }
 
 module.exports = { runWeather };

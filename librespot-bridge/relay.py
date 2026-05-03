@@ -31,11 +31,20 @@ _stats_lock  = threading.Lock()
 
 def reporter():
     global _stats_bytes
+    zero_streak = 0
     while True:
         time.sleep(1.0)
         with _stats_lock:
             b = _stats_bytes
             _stats_bytes = 0
+        if b == 0:
+            zero_streak += 1
+            # Suppress idle spam; emit one heartbeat every minute while silent.
+            if zero_streak % 60 != 0:
+                continue
+        else:
+            zero_streak = 0
+
         ratio = b / BYTES_PER_SEC
         ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         print(f"[{ts}] [relay] {b} bytes ({ratio:.3f}x realtime)", flush=True)
