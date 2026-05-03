@@ -5,6 +5,7 @@ PIPE=/tmp/audio/spotify.pcm
 TOKEN_DIR=/data/tokens
 CACHE_DIR=/data/librespot-cache
 ACTIVE_CONTROLLER_FILE=/data/active_controller_id
+MANUAL_STOP_FILE=/tmp/librespot.manual_stop
 
 mkdir -p "$CACHE_DIR"
 
@@ -46,21 +47,64 @@ trap cleanup SIGTERM SIGINT
 CREDS_FILE="$CACHE_DIR/credentials.json"
 ACCESS_TOKEN=""
 
+get_access_token_from_file() {
+    local token_file="$1"
+    python3 - "$token_file" <<'PYEOF'
+import json, sys, time, urllib.request, urllib.parse, base64, os
+
+path = sys.argv[1]
+try:
+    data = json.loads(open(path).read())
+except Exception:
+    print("", end="")
+    raise SystemExit(0)
+
+token = data.get("access_token", "")
+expires_at = float(data.get("expires_at", 0) or 0)
+
+if token and time.time() < (expires_at - 60):
+    print(token, end="")
+    raise SystemExit(0)
+
+refresh_token = data.get("refresh_token", "")
+cid = os.environ.get("SPOTIFY_CLIENT_ID", "")
+cs = os.environ.get("SPOTIFY_CLIENT_SECRET", "")
+if not (refresh_token and cid and cs):
+    print(token or "", end="")
+    raise SystemExit(0)
+
+try:
+    creds = base64.b64encode(f"{cid}:{cs}".encode()).decode()
+    req = urllib.request.Request(
+        "https://accounts.spotify.com/api/token",
+        data=urllib.parse.urlencode({"grant_type": "refresh_token", "refresh_token": refresh_token}).encode(),
+        headers={"Authorization": f"Basic {creds}", "Content-Type": "application/x-www-form-urlencoded"},
+        method="POST",
+    )
+    resp = json.loads(urllib.request.urlopen(req, timeout=10).read())
+    new_token = resp.get("access_token", "")
+    if new_token:
+        data["access_token"] = new_token
+        data["expires_at"] = time.time() + resp.get("expires_in", 3600)
+        if "refresh_token" in resp:
+            data["refresh_token"] = resp["refresh_token"]
+        open(path, "w").write(json.dumps(data))
+        print(new_token, end="")
+        raise SystemExit(0)
+except Exception:
+    pass
+
+print(token or "", end="")
+PYEOF
+}
+
 # Prefer the active controller account selected by the Discord bot.
 if [[ -f "$ACTIVE_CONTROLLER_FILE" ]]; then
     ACTIVE_ID=$(tr -d '\r\n' < "$ACTIVE_CONTROLLER_FILE")
     if [[ -n "$ACTIVE_ID" ]]; then
         ACTIVE_TOKEN_FILE="$TOKEN_DIR/${ACTIVE_ID}.json"
         if [[ -f "$ACTIVE_TOKEN_FILE" ]]; then
-            TOKEN=$(python3 - "$ACTIVE_TOKEN_FILE" <<'PYEOF'
-import json, sys
-try:
-    data = json.loads(open(sys.argv[1]).read())
-    print(data.get("access_token", ""), end="")
-except Exception:
-    print("", end="")
-PYEOF
-            )
+            TOKEN=$(get_access_token_from_file "$ACTIVE_TOKEN_FILE")
             if [[ -n "$TOKEN" ]]; then
                 ACCESS_TOKEN="$TOKEN"
                 rm -f "$CREDS_FILE"
@@ -75,15 +119,7 @@ fi
 if [[ -z "$ACCESS_TOKEN" && -n "${SPOTIFY_SHARED_DISCORD_ID:-}" ]]; then
     SHARED_TOKEN_FILE="$TOKEN_DIR/${SPOTIFY_SHARED_DISCORD_ID}.json"
     if [[ -f "$SHARED_TOKEN_FILE" ]]; then
-        TOKEN=$(python3 - "$SHARED_TOKEN_FILE" <<'PYEOF'
-import json, sys
-try:
-    data = json.loads(open(sys.argv[1]).read())
-    print(data.get("access_token", ""), end="")
-except Exception:
-    print("", end="")
-PYEOF
-        )
+        TOKEN=$(get_access_token_from_file "$SHARED_TOKEN_FILE")
         if [[ -n "$TOKEN" ]]; then
             ACCESS_TOKEN="$TOKEN"
             # Clear stale cached credentials from a different Spotify account.
@@ -99,37 +135,7 @@ if [[ -z "$ACCESS_TOKEN" && ! -f "$CREDS_FILE" ]]; then
         if [[ -d "$TOKEN_DIR" ]]; then
             for f in "$TOKEN_DIR"/*.json; do
                 [[ -f "$f" ]] || continue
-                TOKEN=$(python3 - "$f" <<'PYEOF'
-import json, sys, time, urllib.request, urllib.parse, base64, os
-path = sys.argv[1]
-try:
-    data = json.loads(open(path).read())
-except Exception:
-    sys.exit(1)
-if time.time() > data.get("expires_at", 0) - 60:
-    cid = os.environ.get("SPOTIFY_CLIENT_ID", "")
-    cs  = os.environ.get("SPOTIFY_CLIENT_SECRET", "")
-    if cid and cs:
-        try:
-            creds = base64.b64encode(f"{cid}:{cs}".encode()).decode()
-            req = urllib.request.Request(
-                "https://accounts.spotify.com/api/token",
-                data=urllib.parse.urlencode({"grant_type": "refresh_token", "refresh_token": data["refresh_token"]}).encode(),
-                headers={"Authorization": f"Basic {creds}", "Content-Type": "application/x-www-form-urlencoded"},
-                method="POST",
-            )
-            resp = json.loads(urllib.request.urlopen(req, timeout=10).read())
-            data["access_token"] = resp["access_token"]
-            data["expires_at"] = time.time() + resp.get("expires_in", 3600)
-            if "refresh_token" in resp:
-                data["refresh_token"] = resp["refresh_token"]
-            open(path, "w").write(json.dumps(data))
-        except Exception:
-            pass
-tok = data.get("access_token", "")
-print(tok if tok else "", end="")
-PYEOF
-                )
+                TOKEN=$(get_access_token_from_file "$f")
                 if [[ -n "$TOKEN" ]]; then
                     ACCESS_TOKEN="$TOKEN"
                     break 2
@@ -163,12 +169,21 @@ echo "[librespot] Starting ${SPOTIFY_DEVICE_NAME:-SpoticordPi}…"
 
 # Keep the control API alive even if librespot auth fails temporarily.
 while true; do
+    if [[ -f "$MANUAL_STOP_FILE" ]]; then
+        sleep 1
+        continue
+    fi
+
     # Rate-limited relay: reads stdin AND writes FIFO at real-time pace.
     # Sleep BEFORE each read so librespot's stdout buffer never builds up.
     PIPE_PATH="$PIPE" librespot "${ARGS[@]}" | python3 -u /app/relay.py &
     RELAY_PID=$!
 
     wait "$RELAY_PID" || true
-    echo "[librespot] Relay exited; retrying in 3s"
+    if [[ -f "$MANUAL_STOP_FILE" ]]; then
+        echo "[librespot] Relay exited; waiting for restart command"
+    else
+        echo "[librespot] Relay exited; retrying in 3s"
+    fi
     sleep 3
 done
